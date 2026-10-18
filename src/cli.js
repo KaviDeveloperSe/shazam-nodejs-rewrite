@@ -13,6 +13,8 @@ import * as catalog from './catalog.js';
 import { createServer } from './server.js';
 import { InputError, AppError } from './errors.js';
 
+const DEFAULT_RENDER_URL = 'https://shazam-nodejs-rewrite.onrender.com';
+
 // ANSI terminal colors helper
 const useColor = !process.env.NO_COLOR && (process.stdout.isTTY || process.env.FORCE_COLOR);
 const c = {
@@ -49,15 +51,21 @@ function printHelp() {
   shazam <command> [options]
   node src/cli.js <command> [options]
 
-${c.bold}COMMANDS:${c.reset}
-  ${c.green}recognize${c.reset} <file|dir>     ${c.dim}Identify audio/video song (aliases: rec, find, id)${c.reset}
+${c.bold}LOCAL COMMANDS:${c.reset}
+  ${c.green}recognize${c.reset} <file|dir>     ${c.dim}Identify audio/video song locally or via server${c.reset}
   ${c.green}search${c.reset} <query>           ${c.dim}Search Shazam & Apple Music catalog (alias: s)${c.reset}
   ${c.green}details${c.reset} <trackId>        ${c.dim}Get comprehensive track metadata (alias: info)${c.reset}
   ${c.green}lyrics${c.reset} <trackId>         ${c.dim}Fetch song lyrics for a track${c.reset}
   ${c.green}benchmark${c.reset} <file>         ${c.dim}Measure latency of decode, fingerprint, & API${c.reset}
-  ${c.green}serve${c.reset}                    ${c.dim}Start REST API server (aliases: server, start)${c.reset}
+  ${c.green}serve${c.reset}                    ${c.dim}Start local REST API server (aliases: server, start)${c.reset}
 
-${c.bold}RECOGNIZE OPTIONS:${c.reset}
+${c.bold}RENDER / CLOUD TESTING COMMANDS:${c.reset}
+  ${c.green}test-render${c.reset} [file]       ${c.dim}Test live Render song finder (alias: test-remote)${c.reset}
+  ${c.green}ping${c.reset} [url]               ${c.dim}Ping Render API server & check latency${c.reset}
+
+${c.bold}OPTIONS:${c.reset}
+  ${c.cyan}--server <url>${c.reset}           Remote server URL (e.g. https://shazam-nodejs-rewrite.onrender.com)
+  ${c.cyan}--api-key <key>${c.reset}          API key for protected Render endpoints
   ${c.cyan}--fast, -f${c.reset}               Enable ultra-fast mode (7s window, instant seek)
   ${c.cyan}--parallel, -p${c.reset}           Probe multiple candidate windows simultaneously
   ${c.cyan}--offset <sec>${c.reset}           Starting time offset in seconds
@@ -70,20 +78,20 @@ ${c.bold}RECOGNIZE OPTIONS:${c.reset}
   ${c.cyan}--silent, -s${c.reset}             Suppress progress spinners and banner
 
 ${c.bold}EXAMPLES:${c.reset}
-  ${c.yellow}# Fast song recognition${c.reset}
-  shazam recognize "./sample.mp3" --fast
+  ${c.yellow}# Test song recognition on Render${c.reset}
+  node src/cli.js test-render
 
-  ${c.yellow}# Shortcut directly with file path${c.reset}
-  shazam "./song.mp3.mp4"
+  ${c.yellow}# Test Render with specific audio file & API key${c.reset}
+  node src/cli.js test-render "song.mp3.mp4" --api-key YOUR_KEY
 
-  ${c.yellow}# Search for songs${c.reset}
-  shazam search "Blinding Lights The Weeknd"
+  ${c.yellow}# Ping Render deployment${c.reset}
+  node src/cli.js ping https://shazam-nodejs-rewrite.onrender.com
 
-  ${c.yellow}# Speed diagnostic${c.reset}
-  shazam benchmark "./sample.wav"
+  ${c.yellow}# Recognize a song via Render cloud API${c.reset}
+  node src/cli.js recognize "song.mp3.mp4" --server https://shazam-nodejs-rewrite.onrender.com
 
-  ${c.yellow}# Run API server for Render or local hosting${c.reset}
-  shazam serve --port 8000
+  ${c.yellow}# Fast local song recognition${c.reset}
+  node src/cli.js recognize "./song.mp3.mp4"
 `);
 }
 
@@ -107,7 +115,9 @@ function parseCliArgs(argv) {
     } else if (arg === '--batch') {
       flags.batch = true;
     } else if (arg.startsWith('--')) {
-      const key = arg.slice(2);
+      let key = arg.slice(2);
+      if (key === 'api-key') key = 'apiKey';
+      if (key === 'remote') key = 'server';
       const next = argv[i + 1];
       if (next != null && !next.startsWith('--')) {
         flags[key] = next;
@@ -138,7 +148,7 @@ function formatDuration(sec) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function printCard(result) {
+function printCard(result, isRemote = false) {
   const track = result.track;
   const audio = result.audio || {};
   const durationStr = audio.duration_seconds ? formatDuration(audio.duration_seconds) : 'N/A';
@@ -149,7 +159,8 @@ function printCard(result) {
   const w = 68;
   const line = '─'.repeat(w);
   console.log(`\n${c.cyan}┌${line}┐${c.reset}`);
-  console.log(`${c.cyan}│${c.reset}  ${c.green}${c.bold}🎵  SONG RECOGNIZED${c.reset}${' '.repeat(w - 20)}${c.cyan}│${c.reset}`);
+  const tag = isRemote ? '☁️  SONG RECOGNIZED (RENDER)' : '🎵  SONG RECOGNIZED';
+  console.log(`${c.cyan}│${c.reset}  ${c.green}${c.bold}${tag}${c.reset}${' '.repeat(Math.max(0, w - tag.length - 4))}${c.cyan}│${c.reset}`);
   console.log(`${c.cyan}├${line}┤${c.reset}`);
 
   const row = (label, val, color = '') => {
@@ -167,8 +178,8 @@ function printCard(result) {
   if (track.genre) row('Genre', track.genre);
   if (track.release_date) row('Year', track.release_date);
   if (track.label) row('Label', track.label);
-  row('Audio File', result.source || 'Stream');
-  row('File Length', `${durationStr} (${sizeMb})`);
+  row('Audio Source', result.source || 'Stream');
+  row('Audio Length', `${durationStr} (${sizeMb})`);
   row('Identified At', offsetStr);
   row('Shazam Key', track.shazam_key, c.magenta);
   if (track.apple_id) row('Apple ID', track.apple_id);
@@ -183,7 +194,67 @@ function printCard(result) {
   console.log(`${c.cyan}└${line}┘${c.reset}\n`);
 }
 
+async function recognizeRemote(target, serverUrl, flags) {
+  const base = serverUrl.replace(/\/+$/, '');
+  const url = new URL(`${base}/recognize/file`);
+  if (flags.offset != null) url.searchParams.set('offset_seconds', String(flags.offset));
+  if (flags.duration != null) url.searchParams.set('duration_seconds', String(flags.duration));
+  if (flags.country) url.searchParams.set('country', flags.country);
+  if (flags.language) url.searchParams.set('language', flags.language);
+  if (flags.fast) url.searchParams.set('fast', 'true');
+
+  const fileBytes = await fs.readFile(target);
+  const blob = new Blob([fileBytes]);
+  const form = new FormData();
+  form.append('file', blob, path.basename(target));
+
+  const headers = {};
+  const key = flags.apiKey || config.apiKey;
+  if (key) headers['X-API-Key'] = key;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const errorMsg = body?.error || `Remote server HTTP ${res.status}: ${res.statusText}`;
+    const err = new AppError(errorMsg, res.status, body?.code || 'REMOTE_ERROR');
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
 async function handleRecognize(target, flags) {
+  // Remote recognition via server flag
+  const server = flags.server;
+  if (server) {
+    if (!existsSync(target)) throw new InputError(`File not found: ${target}`);
+    if (!flags.silent && !flags.json) {
+      process.stdout.write(`${c.cyan}☁️  Uploading "${path.basename(target)}" to ${server}...${c.reset}\r`);
+    }
+    const t0 = Date.now();
+    const result = await recognizeRemote(target, server, flags);
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+    if (!flags.silent && !flags.json) process.stdout.write(' '.repeat(60) + '\r');
+
+    if (flags.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.is_matched) {
+      printCard(result, true);
+      console.log(`${c.dim}☁️  Recognized by ${server} in ${elapsed}s${c.reset}\n`);
+    } else {
+      console.log(`\n${c.yellow}✖ No match found on server for "${path.basename(target)}"${c.reset} (${elapsed}s)\n`);
+    }
+    if (flags.output) {
+      await fs.writeFile(flags.output, JSON.stringify(result, null, 2));
+    }
+    return;
+  }
+
   const isDirectory = existsSync(target) && statSync(target).isDirectory();
   const audioExtensions = new Set(['.mp3', '.m4a', '.wav', '.flac', '.aac', '.ogg', '.opus', '.wma', '.mp4', '.mkv', '.webm']);
 
@@ -239,7 +310,7 @@ async function handleRecognize(target, flags) {
     return;
   }
 
-  // Single file recognition
+  // Single file recognition locally
   if (!existsSync(target)) {
     throw new InputError(`File not found: ${target}`);
   }
@@ -402,6 +473,85 @@ async function handleBenchmark(target, flags) {
   }
 }
 
+async function handlePing(targetUrl, flags) {
+  const server = targetUrl || flags.server || DEFAULT_RENDER_URL;
+  const base = server.replace(/\/+$/, '');
+  const healthUrl = `${base}/health`;
+  console.log(`\n${c.bold}📡 Pinging Server:${c.reset} ${healthUrl}`);
+
+  const t0 = performance.now();
+  try {
+    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(30000) });
+    const latency = (performance.now() - t0).toFixed(0);
+    const body = await res.json().catch(() => null);
+
+    if (res.ok) {
+      console.log(`\n  ${c.green}${c.bold}✔ SERVER IS HEALTHY${c.reset} (${latency} ms)`);
+      console.log(`  ${c.dim}Status:${c.reset}   ${body?.status || 'ok'}`);
+      console.log(`  ${c.dim}Backend:${c.reset}  ${body?.backend || 'nodejs'}`);
+      console.log(`  ${c.dim}Active Jobs:${c.reset} ${body?.recognition_jobs ?? 0}`);
+      console.log(`  ${c.dim}Endpoints:${c.reset}   ${body?.endpoints?.length || 0} routes available\n`);
+    } else {
+      console.log(`\n  ${c.red}${c.bold}✖ Server responded with HTTP ${res.status}${c.reset} (${latency} ms)\n`);
+    }
+  } catch (err) {
+    console.log(`\n  ${c.red}${c.bold}✖ Ping failed:${c.reset} ${err.message}\n`);
+  }
+}
+
+async function handleTestRender(target, flags) {
+  const serverUrl = flags.server || DEFAULT_RENDER_URL;
+  const file = target || (existsSync('song.mp3.mp4') ? 'song.mp3.mp4' : 'test/fixtures/test-signal.wav');
+  console.log(`\n${c.bold}🧪 TESTING RENDER SONG FINDER${c.reset}`);
+  console.log(`  ${c.cyan}Server URL:${c.reset}  ${serverUrl}`);
+  console.log(`  ${c.cyan}Audio File:${c.reset}  ${file}`);
+  if (flags.apiKey) {
+    console.log(`  ${c.cyan}API Key:${c.reset}     ***${flags.apiKey.slice(-4)}`);
+  }
+  console.log();
+
+  // Step 1: Health check
+  process.stdout.write(`  [1/2] Checking Render health status... `);
+  const t0 = performance.now();
+  try {
+    const healthRes = await fetch(`${serverUrl.replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(30000) });
+    const healthTime = (performance.now() - t0).toFixed(0);
+    if (!healthRes.ok) {
+      console.log(`${c.red}✖ FAILED (HTTP ${healthRes.status})${c.reset}`);
+      return;
+    }
+    console.log(`${c.green}✔ OK${c.reset} (${healthTime} ms)`);
+  } catch (err) {
+    console.log(`${c.red}✖ FAILED: ${err.message}${c.reset}`);
+    return;
+  }
+
+  // Step 2: Song recognition upload
+  process.stdout.write(`  [2/2] Uploading & identifying audio on Render... `);
+  const t1 = performance.now();
+  try {
+    const result = await recognizeRemote(file, serverUrl, flags);
+    const recTime = ((performance.now() - t1) / 1000).toFixed(2);
+    console.log(`${c.green}✔ SUCCESS${c.reset} (${recTime}s)`);
+    if (result.is_matched) {
+      printCard(result, true);
+      console.log(`${c.dim}⚡ Test completed successfully on ${serverUrl}${c.reset}\n`);
+    } else {
+      console.log(`\n  ${c.yellow}✖ Song was processed on Render, but no Shazam match was found.${c.reset}\n`);
+    }
+  } catch (err) {
+    console.log(`${c.red}✖ FAILED: ${err.message}${c.reset}`);
+    if (err.status === 401 || err.message.includes('API key')) {
+      console.log(`\n  ${c.yellow}${c.bold}💡 Authentication Note:${c.reset}`);
+      console.log(`  Your Render instance has an API_KEY configured in its environment.`);
+      console.log(`  Pass it to the CLI with:`);
+      console.log(`    ${c.cyan}node src/cli.js test-render --api-key YOUR_RENDER_API_KEY${c.reset}`);
+      console.log(`  Or set ${c.cyan}API_KEY=YOUR_KEY${c.reset} in your local .env file.`);
+      console.log(`  (Or remove API_KEY in the Render dashboard if you want unauthenticated public access).\n`);
+    }
+  }
+}
+
 async function handleServe(flags) {
   const port = flags.port ? Number(flags.port) : config.port;
   const host = flags.host || config.host;
@@ -446,6 +596,16 @@ async function main() {
       case 'id':
         if (!targetArg) throw new InputError('Audio file or directory required: shazam recognize <path>');
         await handleRecognize(targetArg, flags);
+        break;
+
+      case 'test-render':
+      case 'test-remote':
+      case 'test':
+        await handleTestRender(targetArg, flags);
+        break;
+
+      case 'ping':
+        await handlePing(targetArg, flags);
         break;
 
       case 'search':
