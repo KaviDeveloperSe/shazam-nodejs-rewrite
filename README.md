@@ -28,6 +28,15 @@ node src/cli.js search "Coldplay Yellow"
 # Batch scan and identify an entire folder of songs
 node src/cli.js recognize "./music-folder/" --batch
 
+# Test live song recognition on your Render deployment
+node src/cli.js test-render
+
+# Ping Render health and response latency
+node src/cli.js ping https://shazam-nodejs-rewrite.onrender.com
+
+# Recognize a song via Render cloud API
+node src/cli.js recognize ".\song.mp3.mp4" --server https://shazam-nodejs-rewrite.onrender.com
+
 # Raw JSON output for scripts and piping
 node src/cli.js recognize ".\song.mp3" --json
 ```

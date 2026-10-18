@@ -11,6 +11,8 @@
     "recognize": "node src/cli.js recognize",
     "search": "node src/cli.js search",
     "benchmark": "node src/cli.js benchmark",
+    "test:render": "node src/cli.js test-render",
+    "ping:render": "node src/cli.js ping",
     "render-build": "chmod +x ./render-build.sh 2>/dev/null || true; ./render-build.sh",
     "test": "node --test"
   },
