@@ -42,6 +42,12 @@ See [`RENDER_DEPLOYMENT.md`](./RENDER_DEPLOYMENT.md) for full instructions.
 
 Health check endpoint: `GET /health`
 
+## 📖 Complete API Documentation
+
+For the full reference guide covering all 25+ REST endpoints, query parameters, multipart file uploads, response schemas, and code examples (cURL, Node.js, Python), see:
+
+👉 **[`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md)**
+
 ## Windows setup (PowerShell)
 
 Prerequisites: Node.js **20.11+** (22/24 recommended); `ffmpeg` and `ffprobe` on PATH.
