@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: shazam-api
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: NODE_ENV
+        value: production
+      - key: MAX_AUDIO_MB
+        value: 30
+      - key: MAX_CONCURRENT
+        value: 4
+      - key: MAX_WINDOWS
+        value: 3
+      - key: ENABLE_REMOTE_URLS
+        value: "false"
+      - key: SHAZAM_TIMEZONE
+        value: America/Chicago
+      # Optional: set an API key to protect your service
+      # - key: API_KEY
+      #   generateValue: true

@@ -1,0 +1,24 @@
+{
+  "name": "shazam-nodejs-rewrite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure Node.js audio fingerprinting and Shazam recognition scraper",
+  "engines": { "node": ">=20.11" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "recognize": "node src/cli.js recognize",
+    "search": "node src/cli.js search",
+    "benchmark": "node src/cli.js benchmark",
+    "render-build": "chmod +x ./render-build.sh 2>/dev/null || true; ./render-build.sh",
+    "test": "node --test"
+  },
+  "dependencies": {},
+  "bin": {
+    "shazam": "./src/cli.js",
+    "shazam-node": "./src/cli.js"
+  },
+  "exports": { ".": "./src/index.js", "./fingerprint": "./src/fingerprint.js" },
+  "license": "MIT"
+}
